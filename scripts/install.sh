@@ -6,6 +6,7 @@
 # already present on this machine. Set LSSH_NO_SKILLS=1 to skip that step.
 set -eu
 
+# Once the package is on PyPI, the default can become `lssh-cli`.
 SOURCE="${LSSH_SOURCE:-git+https://github.com/colorful-lollipop/lssh}"
 
 say() { printf '\033[1;36m==>\033[0m %s\n' "$1"; }
@@ -32,10 +33,11 @@ if ! command -v lssh >/dev/null 2>&1; then
 fi
 
 lssh --version
+lssh --init
 
 if [ "${LSSH_NO_SKILLS:-0}" != "1" ]; then
   say "Installing the lssh skill into your AI agents"
   lssh skills install --yes
 fi
 
-say "Done. Next: run 'lssh --init', put passwords in ~/.config/lssh/secrets, then 'lssh <host> uptime'."
+say "Done. Next: put passwords in ~/.config/lssh/secrets, then run 'lssh <host> uptime'."

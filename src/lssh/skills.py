@@ -179,7 +179,7 @@ def install(
             continue
 
         dest = Path(step["path"])
-        if dest.is_symlink():
+        if dest.is_symlink() or dest.is_file():
             dest.unlink()
         elif dest.exists():
             shutil.rmtree(dest)
