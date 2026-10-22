@@ -10,8 +10,7 @@
 | `bj` | 原生 ssh | 示例云主机，走 Tailscale `100.64.0.10`；`bj-pub` 是公网入口 |
 | `ascend-*` | 原生 ssh | 910C 集群，堡垒机 `203.0.113.11:2002` |
 
-凭证由 `lssh-askpass` 按顺序解析：`$LSSH_PASSWORD_CMD` → 系统 keyring →
-`~/.config/lssh/secrets`（0600）→ 旧的 `# lssh-pw` 注释行。
+凭证只有一个来源：`~/.config/lssh/secrets`（每行 `<host-pattern> <password>`，0600）。
 **任何情况下不要把密码写进脚本、日志或回复。**
 
 ## 并发模型
