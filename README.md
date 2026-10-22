@@ -2,6 +2,7 @@
 
 [![CI](https://github.com/colorful-lollipop/lssh/actions/workflows/ci.yml/badge.svg)](https://github.com/colorful-lollipop/lssh/actions/workflows/ci.yml)
 [![Python](https://img.shields.io/badge/python-3.9%2B-blue.svg)](https://www.python.org/)
+[![Agent Skills](https://img.shields.io/badge/Agent%20Skills-ready-A46BFF)](docs/install.md)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
 **English** | [简体中文](README.zh-CN.md)
@@ -31,6 +32,17 @@ To callers it behaves like a working `ssh host cmd`:
 $ lssh a5-53 'npu-smi info -l | head -5'
 $ lssh web-1 'cd /opt/app && git log -1 --oneline'
 ```
+
+## One-line install
+
+Send this to your agent — it installs the CLI, teaches itself the skill, and reports back:
+
+```text
+Install lssh from https://github.com/colorful-lollipop/lssh (run its `scripts/install.sh`),
+then run `lssh skills install --yes` and show me `lssh skills status`.
+```
+
+From a terminal, [`scripts/install.sh`](scripts/install.sh) does the same thing.
 
 ## How it works
 
@@ -65,11 +77,26 @@ binary-ish payloads survive.
 ## Install
 
 ```bash
+curl -fsSL https://raw.githubusercontent.com/colorful-lollipop/lssh/main/scripts/install.sh | sh
+```
+
+The script installs the command with `uv` (or `pipx`, bootstrapping `uv` if neither
+exists), then runs `lssh skills install --yes`. Set `LSSH_NO_SKILLS=1` to skip the skill.
+
+<details>
+<summary>Manual / from source</summary>
+
+```bash
+uv tool install git+https://github.com/colorful-lollipop/lssh   # or: pipx install ...
+```
+
+```bash
 git clone https://github.com/colorful-lollipop/lssh && cd lssh
-python3 -m venv .venv
-.venv/bin/pip install -e .
+python3 -m venv .venv && .venv/bin/pip install -e .
 ln -sf "$PWD/.venv/bin/lssh" ~/.local/bin/lssh
 ```
+
+</details>
 
 Requirements: an OpenSSH client and Python ≥ 3.9 locally. The remote side needs a POSIX
 shell plus `base64` (falls back to `openssl base64 -d`) and, for state persistence,
@@ -117,24 +144,26 @@ it for you. See [docs/configuration.md](docs/configuration.md).
 
 ## Agent skill
 
-The repository ships a skill for coding agents (`skills/lssh/`):
+The wheel ships an Agent Skill; one command puts it where your agents look:
 
 ```bash
-# A. symlink (recommended — always tracks the repo)
-ln -s "$PWD/skills/lssh" ~/.config/opencode/skills/lssh
-
-# B. copy
-cp -r skills/lssh ~/.config/opencode/skills/
+lssh skills install          # preview: which agents, which paths
+lssh skills install --yes    # write
+lssh skills status           # installed / stale / missing
+lssh skills show             # print SKILL.md (to copy it anywhere by hand)
 ```
 
-Or let opencode scan the repository directly:
+One canonical copy goes to `~/.agents/skills/lssh`, the cross-agent location read by
+Codex, Cursor, Gemini CLI, GitHub Copilot, Windsurf, OpenCode and others. Agents that only
+read their own folder (Claude Code, OpenClaw, Qwen Code, Cline, Kiro, Goose, DeepSeek
+Harness…) get a copy when that folder already exists — nothing is created for agents you
+do not have.
 
-```jsonc
-{ "skills": ["~/code/lssh/skills"] }
-```
-
-The skill is a thin index (when to use it, four rules, three failure modes). Details live
-in `skills/lssh/references/details.md`; command semantics live in `lssh -h`.
+Every directory lssh writes carries `.lssh-install.json`; upgrades and
+`lssh skills uninstall --yes` only touch those. `--project` installs into `./.agents` and
+`./.claude` for a single repository, `--agent NAME` limits the run to one agent. The skill
+also bundles `references/commands.md`, generated from the live CLI, so it cannot drift
+from `lssh -h`.
 
 ## Known limitations
 
@@ -156,7 +185,7 @@ in `skills/lssh/references/details.md`; command semantics live in `lssh -h`.
 
 ```bash
 make install   # venv + editable install with dev extras
-make test      # 30 tests, no network required
+make test      # full suite, no network required
 make lint      # ruff check + format check
 ```
 
@@ -176,6 +205,7 @@ print(s.run("cd /tmp && pwd").stdout)
 - [CONTRIBUTING.md](CONTRIBUTING.md) — design constraints and test setup
 - [SECURITY.md](SECURITY.md) — threat model and reporting
 - [docs/configuration.md](docs/configuration.md) — files, settings, credential sources
+- [docs/install.md](docs/install.md) — install instructions for AI agents
 
 ## License
 

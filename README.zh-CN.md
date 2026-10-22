@@ -2,6 +2,7 @@
 
 [![CI](https://github.com/colorful-lollipop/lssh/actions/workflows/ci.yml/badge.svg)](https://github.com/colorful-lollipop/lssh/actions/workflows/ci.yml)
 [![Python](https://img.shields.io/badge/python-3.9%2B-blue.svg)](https://www.python.org/)
+[![Agent Skills](https://img.shields.io/badge/Agent%20Skills-ready-A46BFF)](docs/install.md)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
 [English](README.md) | **简体中文**
@@ -27,6 +28,17 @@ exec 请求（`ssh host 'cmd'`）直接被拒，`scp`/`rsync` 因为要走 subsy
 $ lssh a5-53 'npu-smi info -l | head -5'
 $ lssh web-1 'cd /opt/app && git log -1 --oneline'
 ```
+
+## 一句话安装
+
+把这句话发给你的 Agent —— 它会装好命令、把技能教给自己，然后向你汇报：
+
+```text
+从 https://github.com/colorful-lollipop/lssh 安装 lssh（运行其中的 `scripts/install.sh`），
+然后运行 `lssh skills install --yes`，再把 `lssh skills status` 的结果给我看。
+```
+
+在终端里执行 [`scripts/install.sh`](scripts/install.sh) 效果相同。
 
 ## 工作原理
 
@@ -60,11 +72,26 @@ tmux send-keys -t lssh Enter
 ## 安装
 
 ```bash
+curl -fsSL https://raw.githubusercontent.com/colorful-lollipop/lssh/main/scripts/install.sh | sh
+```
+
+脚本用 `uv`（没有就用 `pipx`，两者都没有则先装 `uv`）安装命令，然后执行
+`lssh skills install --yes`。设置 `LSSH_NO_SKILLS=1` 可跳过技能安装。
+
+<details>
+<summary>手动 / 从源码安装</summary>
+
+```bash
+uv tool install git+https://github.com/colorful-lollipop/lssh   # 或：pipx install ...
+```
+
+```bash
 git clone https://github.com/colorful-lollipop/lssh && cd lssh
-python3 -m venv .venv
-.venv/bin/pip install -e .
+python3 -m venv .venv && .venv/bin/pip install -e .
 ln -sf "$PWD/.venv/bin/lssh" ~/.local/bin/lssh
 ```
+
+</details>
 
 要求：本机有 OpenSSH 客户端 + Python ≥ 3.9。远端只需要 POSIX shell 和 `base64`
 （缺失时退回 `openssl base64 -d`），需要状态保持时再加 `tmux`——全是系统自带的，
@@ -111,24 +138,24 @@ printf '10.0.0.9 %s\n' "$PW" >> ~/.config/lssh/secrets
 
 ## Agent skill
 
-仓库自带一份给 coding agent 用的 skill（`skills/lssh/`）：
+wheel 里自带一份 Agent Skill，一条命令装到本机所有 Agent 能找到的位置：
 
 ```bash
-# A. 目录软链（推荐，仓库更新即生效）
-ln -s "$PWD/skills/lssh" ~/.config/opencode/skills/lssh
-
-# B. 复制
-cp -r skills/lssh ~/.config/opencode/skills/
+lssh skills install          # 预览：装进哪些 Agent、写到哪
+lssh skills install --yes    # 写入
+lssh skills status           # 已装 / 过期 / 未装
+lssh skills show             # 打印 SKILL.md（也可手工复制）
 ```
 
-或者让 opencode 直接扫描仓库：
+规范副本写到 `~/.agents/skills/lssh`——Codex、Cursor、Gemini CLI、GitHub Copilot、
+Windsurf、OpenCode 等读这个跨 Agent 标准目录。只读自己目录的 Agent（Claude Code、
+OpenClaw、Qwen Code、Cline、Kiro、Goose、DeepSeek Harness…）在该目录已存在时各拿一份，
+**不会为用户没装的 Agent 创建目录**。
 
-```jsonc
-{ "skills": ["~/code/lssh/skills"] }
-```
-
-skill 只是薄薄一层索引（何时用、四条规则、三种常见错误）；细节在
-`skills/lssh/references/details.md`，命令语义在 `lssh -h` 里。
+每个写入的目录都带 `.lssh-install.json` 标记，升级和 `lssh skills uninstall --yes`
+只碰这些目录。`--project` 装进当前仓库的 `./.agents` 与 `./.claude`，`--agent NAME`
+只处理一个 Agent。技能还附带由当前 CLI 生成的 `references/commands.md`，不会和
+`lssh -h` 脱节。
 
 ## 已知限制
 
@@ -147,7 +174,7 @@ skill 只是薄薄一层索引（何时用、四条规则、三种常见错误�
 
 ```bash
 make install   # venv + 可编辑安装（含 dev 依赖）
-make test      # 30 个用例，无需网络
+make test      # 全量用例，无需网络
 make lint      # ruff check + format check
 ```
 
@@ -167,6 +194,7 @@ print(s.run("cd /tmp && pwd").stdout)
 - [CONTRIBUTING.md](CONTRIBUTING.md) — 设计约束与开发方式
 - [SECURITY.md](SECURITY.md) — 威胁模型与漏洞上报
 - [docs/configuration.md](docs/configuration.md) — 配置目录、按 host 设置、凭证来源
+- [docs/install.md](docs/install.md) — 给 AI Agent 的安装步骤
 
 ## License
 

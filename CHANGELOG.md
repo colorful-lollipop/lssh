@@ -4,13 +4,32 @@ All notable changes to this project are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2026-10-22
+
+### Added
+
+- `lssh skills install|status|uninstall|show`: copies the bundled Agent Skill into
+  `~/.agents/skills/lssh` and into agents whose config folder already exists (Claude Code,
+  OpenClaw, Qwen Code, Cline, Kiro, Goose, DeepSeek Harness…). A marker file keeps
+  upgrades and uninstall away from hand-written skills.
+- One-line installer (`scripts/install.sh`) and agent-facing `docs/install.md`.
+- The installed skill carries `references/commands.md`, generated from the live CLI.
+
+### Changed
+
+- Distribution name is `lssh-cli` (the PyPI name `lssh` is taken); the command is still
+  `lssh`.
+- Skill files moved into the package (`src/lssh/_skills/lssh`) so wheels ship them and
+  `lssh skills install` works outside a source checkout.
+- `lssh -h` points at the `skills` subcommand.
+
 ## [0.3.0] - 2026-10-22
 
 ### Added
 
 - `lssh-askpass` helper shipped with the package. Credentials come from a single file,
   `~/.config/lssh/secrets` (`<host-pattern> <password>`, mode 0600).
-- `~/.config/lssh/config.json`: per-host defaults (timeout, idle, tmux name, askpass).
+- `~/.config/lssh/config.json`: per-host defaults (timeout, idle, tmux name).
 - `lssh --init` bootstraps the config directory; `docs/configuration.md` documents the
   whole layout and resolution rules.
 
