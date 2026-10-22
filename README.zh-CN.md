@@ -88,7 +88,6 @@ lssh -h                     # 行为说明与长任务写法
 | `--timeout N` | 单条命令超时秒数，默认 120 |
 | `--no-tmux` | 不启用远端 tmux（断线后状态丢失） |
 | `--tmux NAME` | 远端 tmux 会话名，默认 `lssh` |
-| `--askpass PATH` | 指定 `SSH_ASKPASS` 脚本（见下） |
 | `--ssh-arg ARG` | 透传给 `ssh` 的额外参数，可重复 |
 | `--idle N` | 空闲多少秒关闭通道，默认 1800 |
 | `--local SHELL` | 调试用：把"远端"换成本地 shell |
@@ -98,21 +97,17 @@ lssh -h                     # 行为说明与长任务写法
 ## 凭证
 
 lssh 不保存、不读取、不打印密码。网关强制密码认证时，走 OpenSSH 的 askpass 钩子，
-帮手程序 `lssh-askpass` 由本包提供。解析顺序：
+帮手程序 `lssh-askpass` 由本包提供，只读一个文件：
 
-1. `$LSSH_PASSWORD_CMD` —— 任意命令，stdout 即密码（推荐接密钥管理器）
-2. 系统 keyring —— `secret-tool`，service `lssh`，host `<host>`
-3. `~/.config/lssh/secrets` —— 每行 `<host-pattern> <password>`，权限 0600
-4. `~/.ssh/config` 里的 `# lssh-pw` 注释行（已废弃）
+`~/.config/lssh/secrets` —— 每行 `<host-pattern> <password>`，权限 `0600`，支持 `*` 通配：
 
 ```bash
-lssh --init                                       # 生成 ~/.config/lssh/{config.json,secrets}
-export LSSH_PASSWORD_CMD='pass show lssh/bastion' # 推荐
-printf '10.0.0.9 %s\n' "$PW" >> ~/.config/lssh/secrets   # 纯文本兜底
+lssh --init                                     # 生成 config.json 与 secrets（0600）
+printf '10.0.0.9 %s\n' "$PW" >> ~/.config/lssh/secrets
 ```
 
-`~/.ssh` 里不需要放任何东西。完整规则与按 host 的配置见
-[docs/configuration.md](docs/configuration.md)。
+优先用密钥。`secrets` 可以是软链，交给密钥管理器生成即可。
+详见 [docs/configuration.md](docs/configuration.md)。
 
 ## Agent skill
 

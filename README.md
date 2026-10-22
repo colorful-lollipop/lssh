@@ -93,7 +93,6 @@ Options must come before the host (same as `ssh`):
 | `--timeout N` | per-command timeout, default 120 s |
 | `--no-tmux` | do not use remote tmux (loses state across reconnects) |
 | `--tmux NAME` | remote tmux session name, default `lssh` |
-| `--askpass PATH` | `SSH_ASKPASS` script (see below) |
 | `--ssh-arg ARG` | extra argument passed to `ssh`, repeatable |
 | `--idle N` | close an idle channel after N seconds, default 1800 |
 | `--local SHELL` | debug: run against a local shell instead of ssh |
@@ -103,22 +102,18 @@ failures return 1 with the reason on stderr.
 
 ## Credentials
 
-lssh never stores or prints passwords. If a gateway forces password auth, OpenSSH's
-askpass hook is used and lssh ships the helper itself (`lssh-askpass`). Resolution order:
+lssh never stores or prints passwords. When a gateway forces password auth, OpenSSH's
+askpass hook is used and lssh ships the helper (`lssh-askpass`), which reads one file:
 
-1. `$LSSH_PASSWORD_CMD` — any command whose stdout is the password (use a secret manager)
-2. system keyring — `secret-tool`, service `lssh`, host `<host>`
-3. `~/.config/lssh/secrets` — one `<host-pattern> <password>` per line, mode 0600
-4. legacy `# lssh-pw` comment in `~/.ssh/config` (deprecated)
+`~/.config/lssh/secrets` — `<host-pattern> <password>` per line, mode `0600`, `*` wildcard:
 
 ```bash
-lssh --init                                       # ~/.config/lssh/{config.json,secrets}
-export LSSH_PASSWORD_CMD='pass show lssh/bastion' # recommended
-printf '10.0.0.9 %s\n' "$PW" >> ~/.config/lssh/secrets   # plaintext fallback
+lssh --init                                     # creates config.json + secrets (0600)
+printf '10.0.0.9 %s\n' "$PW" >> ~/.config/lssh/secrets
 ```
 
-Nothing needs to live in `~/.ssh`. See [docs/configuration.md](docs/configuration.md)
-for the full resolution rules and per-host settings.
+Prefer keys where possible. `secrets` may be a symlink, so a secret manager can generate
+it for you. See [docs/configuration.md](docs/configuration.md).
 
 ## Agent skill
 

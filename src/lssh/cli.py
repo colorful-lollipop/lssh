@@ -12,7 +12,7 @@ import time
 from typing import Any
 
 from . import __version__
-from .config import init_files, resolve, resolved_askpass
+from .config import init_files, installed_askpass, resolve
 from .daemon import Daemon
 from .paths import log_path, socket_path
 from .transports import LocalTransport, SSHTransport
@@ -29,9 +29,7 @@ def apply_settings(args: argparse.Namespace) -> None:
     for key in ("timeout", "idle", "tmux", "connect_timeout", "cols", "rows"):
         if getattr(args, key) is None:
             setattr(args, key, settings[key])
-    if args.askpass is None:
-        args.askpass = settings.get("askpass")
-    args.askpass = resolved_askpass(args.askpass)
+    args.askpass = installed_askpass()
 
 
 def transport_factory(args: argparse.Namespace):
@@ -93,8 +91,7 @@ def ensure_daemon(args: argparse.Namespace) -> None:
         cmd.append("--no-tmux")
     if args.tmux:
         cmd += ["--tmux", args.tmux]
-    if args.askpass:
-        cmd += ["--askpass", args.askpass]
+
     if args.local:
         cmd += ["--local", args.local]
     if args.idle:
@@ -242,7 +239,6 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--daemon", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--tmux", default=None, help="远端 tmux 会话名（默认 lssh）")
     parser.add_argument("--no-tmux", action="store_true", help="不启用远端 tmux 持久化")
-    parser.add_argument("--askpass", default=None, help="SSH_ASKPASS 脚本路径（密码由脚本自己管）")
     parser.add_argument("--ssh-arg", action="append", metavar="ARG", help="透传给 ssh 的额外参数")
     parser.add_argument("--connect-timeout", type=int, default=None, help="SSH ConnectTimeout 秒数")
     parser.add_argument("--idle", type=float, default=None, help="空闲多少秒后关闭通道")

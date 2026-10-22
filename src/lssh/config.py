@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import fnmatch
 import json
-import os
 import shutil
 import stat
 import sys
@@ -28,14 +27,12 @@ DEFAULTS: dict = {
     "connect_timeout": 15,
     "cols": 512,
     "rows": 50,
-    "askpass": None,
 }
 
-SECRETS_TEMPLATE = """\\
+SECRETS_TEMPLATE = """\
 # lssh secrets — 每行 "<host-pattern> <password>"，本文件必须是 600。
-# 更推荐用真正的密钥管理器，通过环境变量提供密码：
-#   export LSSH_PASSWORD_CMD='pass show lssh/bastion'
-# host-pattern 支持 "*"，匹配 SSH 提示串里的主机部分。
+# host-pattern 支持 * 通配；匹配的是 SSH 提示串里的主机部分。
+# 文件可以是软链：需要密钥管理器时，让别的程序生成它即可。
 """
 
 
@@ -71,20 +68,6 @@ def installed_askpass() -> str | None:
     return shutil.which("lssh-askpass")
 
 
-def resolved_askpass(cfg_askpass: str | None) -> str | None:
-    """显式参数 > 环境变量 > 配置 > 包自带的 lssh-askpass > 旧的 ~/.ssh 脚本。"""
-    if cfg_askpass:
-        return os.path.expanduser(cfg_askpass)
-    env = os.environ.get("LSSH_ASKPASS")
-    if env:
-        return os.path.expanduser(env)
-    helper = installed_askpass()
-    if helper:
-        return helper
-    legacy = Path(os.path.expanduser("~/.ssh/lssh-askpass.sh"))
-    return str(legacy) if legacy.exists() else None
-
-
 def _write_if_missing(path: Path, text: str, mode: int) -> tuple[str, bool]:
     if path.exists():
         return str(path), False
@@ -102,7 +85,6 @@ def init_files() -> list[tuple[str, bool]]:
         "timeout": DEFAULTS["timeout"],
         "idle": DEFAULTS["idle"],
         "tmux": DEFAULTS["tmux"],
-        "askpass": installed_askpass(),
         "hosts": {},
     }
     results.append(

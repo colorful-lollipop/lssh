@@ -8,9 +8,8 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
-- `lssh-askpass` helper shipped with the package: credentials resolve from
-  `$LSSH_PASSWORD_CMD` → system keyring (`secret-tool`) → `~/.config/lssh/secrets`
-  → legacy `~/.ssh/config` comment.
+- `lssh-askpass` helper shipped with the package. Credentials come from a single file,
+  `~/.config/lssh/secrets` (`<host-pattern> <password>`, mode 0600).
 - `~/.config/lssh/config.json`: per-host defaults (timeout, idle, tmux name, askpass).
 - `lssh --init` bootstraps the config directory; `docs/configuration.md` documents the
   whole layout and resolution rules.

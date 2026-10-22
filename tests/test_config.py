@@ -12,39 +12,39 @@ def test_host_from_prompt():
     assert askpass.host_from_prompt("Password:") == ""
 
 
-def test_from_command(monkeypatch):
-    monkeypatch.setenv("LSSH_PASSWORD_CMD", "printf '  spaced  \\n'")
-    assert askpass.from_command() == "  spaced  "
-    monkeypatch.setenv("LSSH_PASSWORD_CMD", "false")
-    assert askpass.from_command() is None
-    monkeypatch.delenv("LSSH_PASSWORD_CMD")
-    assert askpass.from_command() is None
-
-
-def test_from_secrets_file(tmp_path):
+def test_lookup_exact_and_wildcard(tmp_path):
     path = tmp_path / "secrets"
-    path.write_text("# comment\n10.0.0.9 hunter2\n*.example.com wildcard\n")
-    assert askpass.from_secrets_file("10.0.0.9", path) == "hunter2"
-    assert askpass.from_secrets_file("host.example.com", path) == "wildcard"
-    assert askpass.from_secrets_file("10.0.0.10", path) is None
+    path.write_text(
+        "# comment\n10.0.0.9 hunter2\n*.example.com wildcard\nbroken-line-without-password\n"
+    )
+    assert askpass.lookup("10.0.0.9", path) == "hunter2"
+    assert askpass.lookup("host.example.com", path) == "wildcard"
+    assert askpass.lookup("10.0.0.10", path) is None
 
 
-def test_from_ssh_config_legacy(tmp_path):
-    path = tmp_path / "config"
-    path.write_text("Host a\n    HostName 10.0.0.9\n")
-    assert askpass.from_ssh_config("10.0.0.9", path) is None
-    path.write_text("# lssh-pw 10.0.0.9 hunter2\n")
-    assert askpass.from_ssh_config("10.0.0.9", path) == "hunter2"
+def test_lookup_star(tmp_path):
+    path = tmp_path / "secrets"
+    path.write_text("* fallback\n")
+    assert askpass.lookup("anything", path) == "fallback"
 
 
-def test_resolve_prefers_command(tmp_path, monkeypatch):
+def test_missing_file(tmp_path):
+    assert askpass.lookup("10.0.0.9", tmp_path / "nope") is None
+
+
+def test_resolve_from_prompt(tmp_path):
+    path = tmp_path / "secrets"
+    path.write_text("10.0.0.9 hunter2\n")
+    assert askpass.resolve("root@10.0.0.9's password:", path) == "hunter2"
+
+
+def test_main_exit_codes(tmp_path, capsys, monkeypatch):
     secrets = tmp_path / "secrets"
-    secrets.write_text("10.0.0.9 from-file\n")
-    monkeypatch.setenv("LSSH_PASSWORD_CMD", "printf from-cmd")
-    assert askpass.resolve("root@10.0.0.9's password:", secrets) == "from-cmd"
-
-    monkeypatch.delenv("LSSH_PASSWORD_CMD")
-    assert askpass.resolve("root@10.0.0.9's password:", secrets) == "from-file"
+    secrets.write_text("10.0.0.9 hunter2\n")
+    monkeypatch.setattr(askpass, "SECRETS_PATH", secrets)
+    assert askpass.main(["lssh-askpass", "root@10.0.0.9's password:"]) == 0
+    assert capsys.readouterr().out == "hunter2\n"
+    assert askpass.main(["lssh-askpass", "root@10.0.0.10's password:"]) == 1
 
 
 def test_config_resolution(tmp_path, monkeypatch):
