@@ -101,29 +101,24 @@ Options must come before the host (same as `ssh`):
 The exit code is the remote command's (0–255); connection, timeout and verification
 failures return 1 with the reason on stderr.
 
-## Password authentication (only when unavoidable)
+## Credentials
 
-`lssh` never stores, reads or prints credentials. If a gateway forces password auth,
-provide an `SSH_ASKPASS` script (auto-detected at `~/.ssh/lssh-askpass.sh`):
+lssh never stores or prints passwords. If a gateway forces password auth, OpenSSH's
+askpass hook is used and lssh ships the helper itself (`lssh-askpass`). Resolution order:
+
+1. `$LSSH_PASSWORD_CMD` — any command whose stdout is the password (use a secret manager)
+2. system keyring — `secret-tool`, service `lssh`, host `<host>`
+3. `~/.config/lssh/secrets` — one `<host-pattern> <password>` per line, mode 0600
+4. legacy `# lssh-pw` comment in `~/.ssh/config` (deprecated)
 
 ```bash
-#!/bin/sh
-# ~/.ssh/lssh-askpass.sh — reads a password line from ~/.ssh/config
-prompt="$1"
-host=$(printf '%s' "$prompt" | sed -n "s/.*@\([^ ']*\).*/\1/p")
-awk -v h="$host" '/^# lssh-pw / { if ($3 == h || $3 == "*") { print $4; exit } }' "$HOME/.ssh/config"
+lssh --init                                       # ~/.config/lssh/{config.json,secrets}
+export LSSH_PASSWORD_CMD='pass show lssh/bastion' # recommended
+printf '10.0.0.9 %s\n' "$PW" >> ~/.config/lssh/secrets   # plaintext fallback
 ```
 
-```sshconfig
-# ~/.ssh/config   (should already be mode 600)
-# lssh-pw 10.0.0.9 s3cret
-Host bastion-a
-    HostName 10.0.0.9
-    User deploy
-```
-
-Prefer keys. Use the password path only when the gateway leaves no choice, and keep the
-script at mode 600.
+Nothing needs to live in `~/.ssh`. See [docs/configuration.md](docs/configuration.md)
+for the full resolution rules and per-host settings.
 
 ## Agent skill
 
@@ -185,8 +180,7 @@ print(s.run("cd /tmp && pwd").stdout)
 - [CHANGELOG.md](CHANGELOG.md) — release notes
 - [CONTRIBUTING.md](CONTRIBUTING.md) — design constraints and test setup
 - [SECURITY.md](SECURITY.md) — threat model and reporting
-- [docs/bastion-loss-report.md](docs/bastion-loss-report.md) — field notes on a gateway
-  that dropped output bursts, and what was actually worth fixing
+- [docs/configuration.md](docs/configuration.md) — files, settings, credential sources
 
 ## License
 

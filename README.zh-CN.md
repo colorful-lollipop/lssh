@@ -95,28 +95,24 @@ lssh -h                     # 行为说明与长任务写法
 
 退出码与远端命令一致（0–255）；连接、超时、校验失败返回 1，并在 stderr 说明原因。
 
-## 密码认证（只在必要时）
+## 凭证
 
-`lssh` **不保存、不读取、不打印任何密码**。目标只能用密码时，提供一个
-`SSH_ASKPASS` 脚本即可（默认探测 `~/.ssh/lssh-askpass.sh`）：
+lssh 不保存、不读取、不打印密码。网关强制密码认证时，走 OpenSSH 的 askpass 钩子，
+帮手程序 `lssh-askpass` 由本包提供。解析顺序：
+
+1. `$LSSH_PASSWORD_CMD` —— 任意命令，stdout 即密码（推荐接密钥管理器）
+2. 系统 keyring —— `secret-tool`，service `lssh`，host `<host>`
+3. `~/.config/lssh/secrets` —— 每行 `<host-pattern> <password>`，权限 0600
+4. `~/.ssh/config` 里的 `# lssh-pw` 注释行（已废弃）
 
 ```bash
-#!/bin/sh
-# ~/.ssh/lssh-askpass.sh —— 从 ~/.ssh/config 的注释行取密码
-prompt="$1"
-host=$(printf '%s' "$prompt" | sed -n "s/.*@\([^ ']*\).*/\1/p")
-awk -v h="$host" '/^# lssh-pw / { if ($3 == h || $3 == "*") { print $4; exit } }' "$HOME/.ssh/config"
+lssh --init                                       # 生成 ~/.config/lssh/{config.json,secrets}
+export LSSH_PASSWORD_CMD='pass show lssh/bastion' # 推荐
+printf '10.0.0.9 %s\n' "$PW" >> ~/.config/lssh/secrets   # 纯文本兜底
 ```
 
-```sshconfig
-# ~/.ssh/config（本来就应该是 600）
-# lssh-pw 10.0.0.9 s3cret
-Host bastion-a
-    HostName 10.0.0.9
-    User deploy
-```
-
-优先用密钥；密码方案只在网关强制时使用，脚本权限务必设为 600。
+`~/.ssh` 里不需要放任何东西。完整规则与按 host 的配置见
+[docs/configuration.md](docs/configuration.md)。
 
 ## Agent skill
 
@@ -175,7 +171,7 @@ print(s.run("cd /tmp && pwd").stdout)
 - [CHANGELOG.md](CHANGELOG.md) — 版本变更
 - [CONTRIBUTING.md](CONTRIBUTING.md) — 设计约束与开发方式
 - [SECURITY.md](SECURITY.md) — 威胁模型与漏洞上报
-- [docs/bastion-loss-report.md](docs/bastion-loss-report.md) — 某类网关丢块的实测记录与复核
+- [docs/configuration.md](docs/configuration.md) — 配置目录、按 host 设置、凭证来源
 
 ## License
 

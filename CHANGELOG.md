@@ -4,6 +4,21 @@ All notable changes to this project are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2026-10-22
+
+### Added
+
+- `lssh-askpass` helper shipped with the package: credentials resolve from
+  `$LSSH_PASSWORD_CMD` → system keyring (`secret-tool`) → `~/.config/lssh/secrets`
+  → legacy `~/.ssh/config` comment.
+- `~/.config/lssh/config.json`: per-host defaults (timeout, idle, tmux name, askpass).
+- `lssh --init` bootstraps the config directory; `docs/configuration.md` documents the
+  whole layout and resolution rules.
+
+### Changed
+
+- Password setup no longer requires placing a script in `~/.ssh`.
+
 ## [0.2.0] - 2026-10-22
 
 ### Added
