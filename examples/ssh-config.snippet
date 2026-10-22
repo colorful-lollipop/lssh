@@ -1,0 +1,14 @@
+# ~/.ssh/config 片段：给只支持 shell 通道的网关配别名
+#
+# 1) 密码行（如果网关强制密码认证）。文件本身必须 600。
+# lssh-pw 10.20.30.40 s3cret
+#
+# 2) 主机别名。lssh 直接复用 ~/.ssh/config，所以这里配好之后：
+#      lssh bastion-a 'uname -a'
+Host bastion-a
+    HostName 10.20.30.40
+    Port 2002
+    User ops/<server-uuid>/root
+    ServerAliveInterval 30
+    ServerAliveCountMax 3
+    StrictHostKeyChecking accept-new
