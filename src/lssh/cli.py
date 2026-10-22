@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import shutil
 import socket
 import subprocess
@@ -13,36 +12,33 @@ import time
 from typing import Any
 
 from . import __version__
+from .config import init_files, resolve, resolved_askpass
 from .daemon import Daemon
 from .paths import log_path, socket_path
 from .transports import LocalTransport, SSHTransport
 
-DEFAULT_ASKPASS_CANDIDATES = ("~/.ssh/lssh-askpass.sh",)
 CLIENT_TIMEOUT = 24 * 3600.0
 
 
 # --------------------------------------------------------------------- 守护进程
 
 
-def askpass_path(explicit: str | None) -> str | None:
-    """显式指定 > 环境变量 > ~/.ssh/lssh-askpass.sh（存在才用）。"""
-    if explicit:
-        return os.path.expanduser(explicit)
-    env = os.environ.get("LSSH_ASKPASS")
-    if env:
-        return os.path.expanduser(env)
-    for candidate in DEFAULT_ASKPASS_CANDIDATES:
-        path = os.path.expanduser(candidate)
-        if os.path.exists(path):
-            return path
-    return None
+def apply_settings(args: argparse.Namespace) -> None:
+    """CLI 参数 > 配置（按 host 匹配）> 内置默认值。"""
+    settings = resolve(args.host or args.restart)
+    for key in ("timeout", "idle", "tmux", "connect_timeout", "cols", "rows"):
+        if getattr(args, key) is None:
+            setattr(args, key, settings[key])
+    if args.askpass is None:
+        args.askpass = settings.get("askpass")
+    args.askpass = resolved_askpass(args.askpass)
 
 
 def transport_factory(args: argparse.Namespace):
     if args.local:
         return lambda host: LocalTransport(shell=args.local)
 
-    askpass = askpass_path(args.askpass)
+    askpass = args.askpass
 
     def make(host: str) -> SSHTransport:
         return SSHTransport(
@@ -237,22 +233,34 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--json", action="store_true", help="输出原始 JSON")
     parser.add_argument("--timeout", type=float, default=None, help="单条命令超时秒数（默认 120）")
     parser.add_argument("--version", action="version", version=f"lssh {__version__}")
+    parser.add_argument(
+        "--init",
+        action="store_true",
+        help="创建 ~/.config/lssh/{config.json,secrets}（幂等）",
+    )
 
     parser.add_argument("--daemon", action="store_true", help=argparse.SUPPRESS)
-    parser.add_argument("--tmux", default="lssh", help="远端 tmux 会话名（默认 lssh）")
+    parser.add_argument("--tmux", default=None, help="远端 tmux 会话名（默认 lssh）")
     parser.add_argument("--no-tmux", action="store_true", help="不启用远端 tmux 持久化")
     parser.add_argument("--askpass", default=None, help="SSH_ASKPASS 脚本路径（密码由脚本自己管）")
     parser.add_argument("--ssh-arg", action="append", metavar="ARG", help="透传给 ssh 的额外参数")
-    parser.add_argument("--connect-timeout", type=int, default=15, help="SSH ConnectTimeout 秒数")
-    parser.add_argument("--idle", type=float, default=1800.0, help="空闲多少秒后关闭通道")
-    parser.add_argument("--cols", type=int, default=512, help="伪终端列数（默认 512，减少折行）")
-    parser.add_argument("--rows", type=int, default=50, help="伪终端行数")
+    parser.add_argument("--connect-timeout", type=int, default=None, help="SSH ConnectTimeout 秒数")
+    parser.add_argument("--idle", type=float, default=None, help="空闲多少秒后关闭通道")
+    parser.add_argument("--cols", type=int, default=None, help="伪终端列数（默认 512，减少折行）")
+    parser.add_argument("--rows", type=int, default=None, help="伪终端行数")
     parser.add_argument("--local", metavar="SHELL", default=None, help="调试用：在本地 shell 上跑")
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+
+    if args.init:
+        for path, created in init_files():
+            print(("已创建 " if created else "已存在 ") + path)
+        return 0
+
+    apply_settings(args)
 
     if args.daemon:
         return run_daemon(args)

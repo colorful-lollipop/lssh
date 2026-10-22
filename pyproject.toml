@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "lssh"
-version = "0.2.0"
+version = "0.3.0"
 description = "Run commands over long-lived SSH sessions when the gateway forbids the exec channel"
 readme = "README.md"
 requires-python = ">=3.9"
@@ -29,6 +29,7 @@ Changelog = "https://github.com/colorful-lollipop/lssh/blob/main/CHANGELOG.md"
 
 [project.scripts]
 lssh = "lssh.cli:main"
+lssh-askpass = "lssh.askpass:main"
 
 [project.optional-dependencies]
 dev = ["pytest>=8", "ruff>=0.5", "build>=1.2"]

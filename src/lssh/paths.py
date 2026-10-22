@@ -23,6 +23,23 @@ def socket_path() -> Path:
     return Path(override) if override else runtime_dir() / "daemon.sock"
 
 
+def config_dir() -> Path:
+    base = os.environ.get("XDG_CONFIG_HOME") or os.path.join(os.path.expanduser("~"), ".config")
+    return Path(base) / APP
+
+
+def config_path() -> Path:
+    return config_dir() / "config.json"
+
+
+def askpass_path() -> Path:
+    return config_dir() / "askpass.sh"
+
+
+def secrets_path() -> Path:
+    return config_dir() / "secrets"
+
+
 def log_path() -> Path:
     override = os.environ.get("LSSH_LOG")
     return Path(override) if override else cache_dir() / "daemon.log"
