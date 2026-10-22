@@ -208,6 +208,7 @@ def build_parser() -> argparse.ArgumentParser:
             "  lssh a5-53 'cd /opt/app && ls; df -h .'\n"
             "  lssh --timeout 30 --json a5-53 'uptime'\n"
             "  lssh --list / lssh --restart a5-53\n"
+            "  lssh skills install --yes        # 把技能装进本机 AI Agent\n"
             "\n"
             "行为:\n"
             "  * 每条命令跑完才返回（原子输出，带长度+md5 校验），不提供流式。\n"
@@ -249,6 +250,14 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
+    argv = list(sys.argv[1:] if argv is None else argv)
+
+    # 子命令：lssh skills ...
+    if argv and argv[0] == "skills":
+        from .skills_cli import main as skills_main
+
+        return skills_main(argv[1:])
+
     args = build_parser().parse_args(argv)
 
     if args.init:

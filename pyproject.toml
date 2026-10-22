@@ -3,13 +3,13 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "lssh"
-version = "0.3.0"
+name = "lssh-cli"
+version = "0.4.0"
 description = "Run commands over long-lived SSH sessions when the gateway forbids the exec channel"
 readme = "README.md"
 requires-python = ">=3.9"
 license = { text = "MIT" }
-keywords = ["ssh", "bastion", "jump-host", "tmux", "remote-exec"]
+keywords = ["ssh", "bastion", "jump-host", "tmux", "remote-exec", "agent-skills", "ai-agent"]
 authors = [{ name = "lssh contributors" }]
 classifiers = [
   "Development Status :: 4 - Beta",
@@ -38,7 +38,7 @@ dev = ["pytest>=8", "ruff>=0.5", "build>=1.2"]
 where = ["src"]
 
 [tool.setuptools.package-data]
-lssh = ["py.typed"]
+lssh = ["py.typed", "_skills/*/SKILL.md", "_skills/*/references/*.md"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

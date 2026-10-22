@@ -8,7 +8,7 @@
 from importlib.metadata import PackageNotFoundError, version
 
 try:  # 源码树里直接跑（未安装）时兜底
-    __version__ = version("lssh")
+    __version__ = version("lssh-cli")
 except PackageNotFoundError:  # pragma: no cover
     __version__ = "0.0.0"
 

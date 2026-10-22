@@ -1,12 +1,22 @@
 ---
 name: lssh
-description: 在 exec 通道被禁或容易限流的 SSH 机器上执行命令（如 a5-* 集群）。长连接复用、批量命令、状态保持、长任务与超时处理。
+description: Run commands over long-lived SSH sessions on gateways that block the exec channel (ssh host 'cmd' rejected, scp failing, or connections throttled). Use when the user mentions lssh, a bastion/jump host that refuses exec, or a machine that must keep cwd/env and tolerate repeated commands. Covers long jobs, timeouts and concurrency.
+license: MIT
+compatibility: Requires the `lssh` command (Python 3.9+) and an OpenSSH client locally; the remote side only needs a POSIX shell and, optionally, tmux.
+metadata:
+  homepage: "https://github.com/colorful-lollipop/lssh"
 ---
 
 # lssh
 
 `lssh <host> 'cmd'` 相当于可用的 `ssh <host> 'cmd'`：一条长连接 + 远端 tmux，
 命令跑完才返回，同一台机器串行、不同机器并行。
+
+本机没有 `lssh` 时先装（装完技能会落到各 Agent 的技能目录）：
+
+```bash
+uv tool install git+https://github.com/colorful-lollipop/lssh && lssh skills install --yes
+```
 
 ## 什么时候用
 
@@ -49,4 +59,5 @@ lssh a5-53 'tail -5 /tmp/b.log; pgrep -f "make -j16" || echo DONE'
 | `输出校验失败` | 重跑一次；仍失败 `lssh --restart <host>` |
 | `连接失败: 远端 shell 未就绪` | 等 2–3 分钟，别连续重试（限流） |
 
-主机清单、并发实测、反模式和完整排障见 `references/details.md`。
+主机清单、并发实测、反模式和完整排障见 `references/details.md`；
+完整参数见 `references/commands.md`（安装时由 CLI 生成）或 `lssh -h`。
