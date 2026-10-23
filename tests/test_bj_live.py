@@ -78,6 +78,15 @@ def test_long_task_holds_one_slot_while_queries_return(remote):
     assert remote.run("echo after-interrupt", timeout=30).stdout == "after-interrupt"
 
 
+def _wait(predicate, timeout: float = 20.0, interval: float = 0.05) -> bool:
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        if predicate():
+            return True
+        time.sleep(interval)
+    return False
+
+
 def test_parallel_slots_on_real_host(remote):
     """3 个槽位并行 + 第 4 条快速报忙。"""
     import threading
@@ -90,7 +99,9 @@ def test_parallel_slots_on_real_host(remote):
     threads = [threading.Thread(target=run, args=(i,), daemon=True) for i in range(3)]
     for thread in threads:
         thread.start()
-    time.sleep(2.0)
+    # 等三条都真的在远端跑起来：上一轮被打断的 window 可能还要回收几秒，
+    # 用固定 sleep 会偶发"第 4 条其实还有空槽位"的假失败。
+    assert _wait(lambda: all(slot["running"] for slot in remote.info()["slots"])), remote.info()
 
     mark = time.time()
     busy = remote.run("echo nope", timeout=10)
