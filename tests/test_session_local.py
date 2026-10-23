@@ -4,10 +4,11 @@ import subprocess
 import sys
 import tempfile
 import time
+from pathlib import Path
 
 import pytest
 
-from lssh.protocol import build_script, clean, new_token, parse
+from lssh.protocol import build_script, clean, new_token, parse, paths
 from lssh.session import Session
 from lssh.transports import LocalTransport
 
@@ -16,11 +17,22 @@ def local_session(**kwargs) -> Session:
     return Session(host="local", transport=LocalTransport(), tmux=None, **kwargs)
 
 
+def make_tmux_session(tmux_name: str, **kwargs) -> Session:
+    """用干净的 bash 起 pane：本机 ~/.bashrc 会加载 ble.sh，行编辑器会把
+    tmux send-keys 打进去的字符吃掉，测出来的行为跟生产不一致。"""
+    subprocess.run(
+        ["tmux", "new-session", "-d", "-s", tmux_name, "bash", "--noprofile", "--norc"],
+        capture_output=True,
+        check=False,
+    )
+    return Session(host="local-tmux", transport=LocalTransport(), tmux=tmux_name, **kwargs)
+
+
 @pytest.fixture()
 def tmux_session(tmp_path):
-    """走真实 tmux 的会话（超时/中断只有这条路能精确控制）。"""
+    """走真实 tmux 的**单槽位**会话（超时/中断的语义在这里最干净）。"""
     name = "lssh-test-" + next(tempfile._get_candidate_names())  # noqa: SLF001
-    s = Session(host="local-tmux", transport=LocalTransport(), tmux=name)
+    s = make_tmux_session(name, max_slots=1)
     yield s
     s.stop()
     subprocess.run(["tmux", "kill-session", "-t", name], capture_output=True, check=False)
@@ -230,7 +242,45 @@ def test_verify_detects_truncation():
     assert s._verify(token, seg_bad) is False
 
 
-def test_two_timeouts_mark_dirty(tmux_session):
-    assert not tmux_session.run("sleep 5", timeout=0.5).ok
-    assert not tmux_session.run("sleep 5", timeout=0.5).ok
-    assert tmux_session.state == "dirty"
+def test_timeout_reports_still_running(tmux_session):
+    """超时 = 客户端放弃等待，不等于命令失败。
+
+    旧行为是「超时即 Ctrl-C + 标脏」，对 mkfs/dd 这类命令是二次伤害；
+    新行为：如实报告"仍在远端跑"，且不打断它。
+    """
+    result = tmux_session.run("sleep 5", timeout=0.5)
+    assert not result.ok
+    assert result.status == "running"
+    assert "仍在远端执行" in (result.error or "")
+    assert "未发送 Ctrl-C" in (result.error or "")
+    # 会话本身是健康的，只是远端 pane 还占着
+    assert tmux_session.state == "ready"
+    assert tmux_session.info()["remote_busy"] is not None
+
+    # 单槽位下，下一条命令必须快速失败，且不能把还在跑的那条 Ctrl-C 掉
+    second = tmux_session.run("echo x", timeout=5)
+    assert second.status == "busy"
+    assert "仍在远端运行" in (second.error or "")
+    assert tmux_session.state == "ready"
+
+
+def test_finish_unfinished_detects_remote_completion(session):
+    """客户端超时/断连，但远端其实已经跑完：必须报 completed 并带回输出。"""
+    token = new_token()
+    p = paths(token)
+    Path(p["out"]).write_text("all done\n")
+    Path(p["err"]).write_text("")
+    Path(p["rc"]).write_text("0")
+    session.start()
+
+    result = session._finish_unfinished(
+        session.slots[0], token, 1.0, time.time(), disconnected=False, interrupt=False
+    )
+
+    assert result.status == "completed"
+    assert result.rc == 0
+    assert "all done" in result.stdout
+    assert result.note and "不要重跑" in result.note
+
+    for key in ("out", "err", "rc"):
+        Path(p[key]).unlink(missing_ok=True)

@@ -51,15 +51,29 @@ def paths(token: str) -> dict[str, str]:
         "out": base + ".out",
         "err": base + ".err",
         "rc": base + ".rc",
+        "started": base + ".started",
         "done": base + ".done",
     }
 
 
 def build_script(token: str, cmd: str) -> str:
-    """在远端执行、把结果写文件的脚本。"""
+    """在远端执行、把结果写文件的脚本。
+
+    EXIT trap 是兜底：命令里带 `set -e` 或 `exit` 时，sourced 脚本会把 pane 的
+    shell 一起带走，rc 文件就永远写不出来（调用方只能看到"状态未知"）。
+    有了 trap，shell 临死前也会把真实退出码落盘。
+    """
     p = paths(token)
     body = cmd if cmd.strip() else "true"
-    return f"{{\n{body}\n}} >{p['out']} 2>{p['err']}\necho $? >{p['rc']}\n: >{p['done']}\n"
+    return (
+        f": >{p['started']}\n"
+        f"__lssh_finish() {{ __lssh_rc=$?; echo $__lssh_rc >{p['rc']}; : >{p['done']}; }}\n"
+        f"trap __lssh_finish EXIT\n"
+        f"{{\n{body}\n}} >{p['out']} 2>{p['err']}\n"
+        f"echo $? >{p['rc']}\n"
+        f": >{p['done']}\n"
+        f"trap - EXIT\n"
+    )
 
 
 def build_write_lines(token: str, script: str, chunk: int = 900) -> list[str]:
@@ -88,9 +102,38 @@ def build_poll_lines(token: str, timeout: float, interval: float = 0.1) -> list[
     ]
 
 
-def build_report_lines(token: str) -> list[str]:
-    """外层 shell 用：把结果按标记打印出来。"""
+def build_slice_lines(token: str, seconds: float, interval: float = 0.05) -> list[str]:
+    """外层 shell 用：**只等一小段**（slice），结束就返回。
+
+    为什么要在外层 shell 里分段等，而不是一次等到 timeout：
+
+    一条 SSH 通道被所有槽位共享。如果某条命令的快照式轮询在这里阻塞 600s，
+    通道就被它独占，另一条"顺手查一下日志"的命令连发都发不出去 —— 这正是
+    并发改造前的病根。切成 ~0.2s 的片之后，Python 侧每片结束就放开通道，
+    别的槽位的命令可以插进来；长任务只占住自己的 window，不占通道。
+    """
     p = paths(token)
+    rounds = max(1, int(seconds / interval))
+    return [
+        f"__lssh_i=0; while [ ! -f {p['done']} ] && "
+        f"[ $__lssh_i -lt {rounds} ]; do sleep {interval}; "
+        "__lssh_i=$((__lssh_i+1)); done"
+    ]
+
+
+def build_report_lines(token: str, *, cleanup: bool = True) -> list[str]:
+    """外层 shell 用：把结果按标记打印出来。
+
+    cleanup=False 时保留 .out/.err/.rc/.done：报告有可能在传输末端被切片截断，
+    下一次切片要能原样再打一遍（文件已被删就永远解析不出来了）。
+    调用方解析成功后再显式删。
+    """
+    p = paths(token)
+    tail = (
+        f"printf '{token}E\\n'; rm -f {p['out']} {p['err']} {p['rc']} {p['done']} {p['script']}"
+        if cleanup
+        else f"printf '{token}E\\n'"
+    )
     return [
         # 校验信息放在最前面：不能落进 S..M / M..R 的内容区间里
         f"printf '{token} SZ %s %s\\n' "
@@ -102,10 +145,17 @@ def build_report_lines(token: str) -> list[str]:
         f"printf '{token}S\\n'; cat {p['out']} 2>/dev/null; "
         f"printf '\\n{token}M\\n'; cat {p['err']} 2>/dev/null; "
         f"printf '\\n'; printf '{token}R:%s\\n' \"$(cat {p['rc']} 2>/dev/null "
-        f'|| echo -1)"; '
-        f"printf '{token}E\\n'; rm -f {p['out']} {p['err']} {p['rc']} "
-        f"{p['done']} {p['script']}"
+        f'|| echo -1)"; ' + tail
     ]
+
+
+def build_report_block(token: str, *, cleanup: bool = False) -> list[str]:
+    """外层 shell 用：**只有命令结束了才**打印结果（配合切片轮询）。"""
+    return (
+        [f"if [ -f {paths(token)['done']} ]; then"]
+        + [line for line in build_report_lines(token, cleanup=cleanup)]
+        + ["fi"]
+    )
 
 
 def marker(token: str, suffix: str) -> re.Pattern[str]:

@@ -9,6 +9,7 @@ import socket
 import subprocess
 import sys
 import time
+import uuid
 from typing import Any
 
 from . import __version__
@@ -25,8 +26,8 @@ CLIENT_TIMEOUT = 24 * 3600.0
 
 def apply_settings(args: argparse.Namespace) -> None:
     """CLI 参数 > 配置（按 host 匹配）> 内置默认值。"""
-    settings = resolve(args.host or args.restart)
-    for key in ("timeout", "idle", "tmux", "connect_timeout", "cols", "rows"):
+    settings = resolve(args.host or args.restart or args.kill)
+    for key in ("timeout", "idle", "tmux", "connect_timeout", "cols", "rows", "slots"):
         if getattr(args, key) is None:
             setattr(args, key, settings[key])
     args.askpass = installed_askpass()
@@ -59,6 +60,7 @@ def run_daemon(args: argparse.Namespace) -> int:
         idle_timeout=args.idle,
         cols=args.cols,
         rows=args.rows,
+        max_slots=args.slots or 3,
     )
     daemon.serve_forever()
     return 0
@@ -67,9 +69,9 @@ def run_daemon(args: argparse.Namespace) -> int:
 # --------------------------------------------------------------------- 客户端
 
 
-def _connect() -> socket.socket:
+def _connect(timeout: float = CLIENT_TIMEOUT) -> socket.socket:
     sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-    sock.settimeout(CLIENT_TIMEOUT)
+    sock.settimeout(timeout)
     sock.connect(str(socket_path()))
     return sock
 
@@ -100,6 +102,8 @@ def ensure_daemon(args: argparse.Namespace) -> None:
         cmd += ["--cols", str(args.cols)]
     if args.rows:
         cmd += ["--rows", str(args.rows)]
+    if args.slots:
+        cmd += ["--slots", str(args.slots)]
     for extra in args.ssh_arg or []:
         cmd += ["--ssh-arg", extra]
     subprocess.Popen(
@@ -128,7 +132,12 @@ def call(request: dict[str, Any], args: argparse.Namespace | None = None) -> dic
 
 
 def _call_once(request: dict[str, Any]) -> dict[str, Any]:
-    with _connect() as sock:
+    # 客户端等待上限跟着请求的超时走（+60s 给回收 pane 留余量），
+    # 否则守护进程抽风时 CLI 会一直吊到 24h。
+    limit = CLIENT_TIMEOUT
+    if request.get("op") == "run":
+        limit = float(request.get("timeout") or 120.0) + float(request.get("wait") or 0) + 60.0
+    with _connect(min(limit, CLIENT_TIMEOUT)) as sock:
         sock.sendall((json.dumps(request) + "\n").encode())
         buffer = b""
         while not buffer.endswith(b"\n"):
@@ -137,33 +146,64 @@ def _call_once(request: dict[str, Any]) -> dict[str, Any]:
                 break
             buffer += chunk
     if not buffer.strip():
-        return {"ok": False, "error": "守护进程没有返回数据"}
+        return {"ok": False, "error": "守护进程没有返回数据（可能正忙或已退出，试试 lssh --kill）"}
     return json.loads(buffer.decode("utf-8", "replace"))
 
 
 def emit(result: dict[str, Any], as_json: bool) -> int:
+    status = result.get("status") or ("completed" if result.get("ok") else "error")
     if as_json:
         print(json.dumps(result, ensure_ascii=False))
-        if not result.get("ok"):
-            return 1
-        return 0 if result.get("rc") in (0, None) else 1
+        return _exit_code(result, status)
 
     if result.get("stdout"):
         sys.stdout.write(result["stdout"].rstrip("\n") + "\n")
     if result.get("stderr"):
         sys.stderr.write(result["stderr"].rstrip("\n") + "\n")
+    if result.get("note"):
+        sys.stderr.write(f"lssh: {result['note']}\n")
     if not result.get("ok"):
         sys.stderr.write(f"lssh: {result.get('error', '未知错误')}\n")
-        return 1
+        remote = result.get("remote") or {}
+        if remote.get("stdout_file"):
+            alive = (
+                ("是" if remote.get("alive") else "否")
+                if remote.get("reachable")
+                else "未知（远端不可达）"
+            )
+            sys.stderr.write(
+                f"lssh: 远端现场 {remote.get('stdout_file')} / {remote.get('rc_file')}"
+                f"（命令是否还在跑: {alive}）\n"
+            )
+    return _exit_code(result, status)
+
+
+def _exit_code(result: dict[str, Any], status: str) -> int:
+    """退出码语义（照 timeout(1) 的约定，方便脚本判定）：
+
+    0    命令成功
+    124  **客户端放弃等待**（timeout/running/unknown/disconnected）——
+         不代表命令失败，更不代表没执行过，禁止据此重跑破坏性命令
+    130  用户中断
+    其他  远端命令的 rc / 1
+    """
+    if status in ("timeout", "running", "unknown", "disconnected"):
+        return 124
+    if status == "cancelled":
+        return 130
     rc = result.get("rc")
-    if rc == 0:
-        return 0
-    return rc if isinstance(rc, int) and 0 < rc < 256 else 1
+    if isinstance(rc, int) and 0 < rc < 256:
+        return rc
+    return 0 if result.get("ok") else 1
 
 
-def _interrupt(host: str) -> None:
+def _interrupt(host: str, req_id: str | None = None) -> None:
+    """只打断自己那一条命令：req_id 让守护进程精确定位到具体槽位。
+
+    没有 req_id（老守护进程/刚重启）时守护进程会退化成"打断该主机所有在跑的"。
+    """
     try:
-        call({"op": "interrupt", "host": host})
+        call({"op": "interrupt", "host": host, "req_id": req_id})
     except (OSError, ValueError):
         pass
 
@@ -184,10 +224,13 @@ def repl(host: str, timeout: float | None) -> int:
         if line == ":interrupt":
             call({"op": "interrupt", "host": host})
             continue
+        req_id = uuid.uuid4().hex
         try:
-            result = call({"op": "run", "host": host, "cmd": line, "timeout": timeout})
+            result = call(
+                {"op": "run", "host": host, "cmd": line, "timeout": timeout, "req_id": req_id}
+            )
         except KeyboardInterrupt:
-            _interrupt(host)
+            _interrupt(host, req_id)
             print("^C（已向远端发送 Ctrl-C）")
             continue
         code = emit(result, False)
@@ -207,15 +250,22 @@ def build_parser() -> argparse.ArgumentParser:
             "  lssh a5-53 'npu-smi info | head -5'\n"
             "  lssh a5-53 'cd /opt/app && ls; df -h .'\n"
             "  lssh --timeout 30 --json a5-53 'uptime'\n"
-            "  lssh --list / lssh --restart a5-53\n"
+            "  lssh --list / lssh --kill a5-53 / lssh --wait 60 a5-53 'uptime'\n"
+            "  lssh --slot 1 a5-53 'npu-smi info'   # 钉在某个槽位\n"
             "  lssh skills install --yes        # 把技能装进本机 AI Agent\n"
             "\n"
             "行为:\n"
             "  * 每条命令跑完才返回（原子输出，带长度+md5 校验），不提供流式。\n"
-            "  * 同一台机器串行排队，不同机器并行；多个 agent 共享同一守护进程。\n"
-            "  * 退出码 = 远端命令的 rc；连接/超时/校验失败返回 1 并打印原因。\n"
+            "  * 同一台机器最多 3 个并发槽位（--slots 可调）：某条长任务挂住时，\n"
+            "    另一条命令仍能秒回。连续命令粘在同一槽位，cwd/env 照旧保持；\n"
+            "    并发时会落到不同槽位（各自的 cwd），建议用绝对路径或自带 cd。\n"
+            "  * 不同机器并行；多个 agent 共享同一守护进程。--list 可看每个槽位在跑什么。\n"
+            "  * **timeout ≠ 没执行**：超时只代表客户端放弃等待。lssh 会去远端查现场，\n"
+            "    明确告诉你是 completed / running / disconnected，并带回已产出的输出。\n"
+            "    默认不打断远端命令（--interrupt-on-timeout 才发 Ctrl-C）。\n"
+            "  * 退出码：0 成功、124 客户端放弃等待（勿据此重跑）、130 中断、其余为远端 rc。\n"
             "\n"
-            "长任务请自己放后台并用 tail 轮询:\n"
+            "长任务推荐自己放后台再轮询:\n"
             "  lssh h 'cd /opt && nohup make -j16 > /tmp/b.log 2>&1 & echo $!'\n"
             "  lssh h 'tail -5 /tmp/b.log; pgrep -f make || echo DONE'\n"
             "\n"
@@ -227,9 +277,25 @@ def build_parser() -> argparse.ArgumentParser:
 
     parser.add_argument("--list", action="store_true", help="列出会话状态")
     parser.add_argument("--restart", metavar="HOST", help="断开重连指定主机")
+    parser.add_argument(
+        "--kill",
+        metavar="HOST",
+        help="强制回收整台机器的远端会话（所有槽位一起清）并断开，下次调用自动重建",
+    )
     parser.add_argument("--stop", action="store_true", help="关闭守护进程")
     parser.add_argument("--json", action="store_true", help="输出原始 JSON")
     parser.add_argument("--timeout", type=float, default=None, help="单条命令超时秒数（默认 120）")
+    parser.add_argument(
+        "--wait",
+        type=float,
+        default=0.0,
+        help="会话忙时最多排队等待秒数（默认 0 = 立刻报忙并说明在跑什么）",
+    )
+    parser.add_argument(
+        "--interrupt-on-timeout",
+        action="store_true",
+        help="超时后给远端发 Ctrl-C（默认不发：mkfs/dd 这类命令误打断比超时更危险）",
+    )
     parser.add_argument("--version", action="version", version=f"lssh {__version__}")
     parser.add_argument(
         "--init",
@@ -243,6 +309,15 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--ssh-arg", action="append", metavar="ARG", help="透传给 ssh 的额外参数")
     parser.add_argument("--connect-timeout", type=int, default=None, help="SSH ConnectTimeout 秒数")
     parser.add_argument("--idle", type=float, default=None, help="空闲多少秒后关闭通道")
+    parser.add_argument(
+        "--slots",
+        type=int,
+        default=None,
+        help="每台机器最大并发槽位数（默认 3；1 = 退回串行），需重启守护进程生效",
+    )
+    parser.add_argument(
+        "--slot", type=int, default=None, help="把命令钉在指定槽位（默认自动挑空闲的）"
+    )
     parser.add_argument("--cols", type=int, default=None, help="伪终端列数（默认 512，减少折行）")
     parser.add_argument("--rows", type=int, default=None, help="伪终端行数")
     parser.add_argument("--local", metavar="SHELL", default=None, help="调试用：在本地 shell 上跑")
@@ -274,7 +349,7 @@ def main(argv: list[str] | None = None) -> int:
         print("lssh: 找不到 ssh 客户端", file=sys.stderr)
         return 2
 
-    if args.list or args.stop or args.restart:
+    if args.list or args.stop or args.restart or args.kill:
         ensure_daemon(args)
         if args.list:
             result = call({"op": "list"})
@@ -285,17 +360,39 @@ def main(argv: list[str] | None = None) -> int:
             if not sessions:
                 print("（无会话）")
             for item in sessions:
-                flag = "  BUSY" if item.get("busy") else ""
+                slots = item.get("slots") or []
+                used = sum(1 for s in slots if s.get("busy"))
+                flag = f"  BUSY {used}/{len(slots)}" if used else ""
                 print(
                     f"{item['host']:<16} {item['state']:<8} "
                     f"idle={item['idle']:>7.1f}s up={item['uptime']:>7.1f}s{flag}"
                 )
+                for slot in slots:
+                    running = slot.get("running")
+                    pending = slot.get("pending")
+                    if running:
+                        print(
+                            f"{'':<16} w{slot['slot']} running: {running['cmd']!r} "
+                            f"({running['for']}s)"
+                        )
+                    elif pending:
+                        tail = "远端仍在跑" if not pending.get("unconfirmed") else "远端可能仍在跑"
+                        print(
+                            f"{'':<16} w{slot['slot']} {tail}: {pending['cmd']!r} "
+                            f"({pending['for']}s)"
+                        )
                 if item.get("last_error"):
                     print(f"{'':<16} last_error: {item['last_error']}")
             return 0
         if args.stop:
             print(json.dumps(call({"op": "stop"}), ensure_ascii=False))
             return 0
+        if args.kill:
+            result = call({"op": "kill", "host": args.kill}, args)
+            if result.get("ok") and not args.json:
+                print(f"lssh: 已回收 {args.kill}（远端 tmux 会话已删除，下次调用自动重建）")
+                return 0
+            return emit(result, args.json)
         ensure_daemon(args)
         result = call({"op": "restart", "host": args.restart})
         if result.get("ok") and not args.json:
@@ -321,10 +418,23 @@ def main(argv: list[str] | None = None) -> int:
             print("lssh: 空命令", file=sys.stderr)
             return 2
 
+    req_id = uuid.uuid4().hex
     try:
-        result = call({"op": "run", "host": args.host, "cmd": cmd, "timeout": args.timeout})
+        result = call(
+            {
+                "op": "run",
+                "host": args.host,
+                "cmd": cmd,
+                "timeout": args.timeout,
+                "wait": args.wait,
+                "interrupt_on_timeout": bool(args.interrupt_on_timeout),
+                "req_id": req_id,
+                "slot": args.slot,
+            },
+            args,
+        )
     except KeyboardInterrupt:
-        _interrupt(args.host)
+        _interrupt(args.host, req_id)
         sys.stderr.write("\nlssh: 已中断（远端已收到 Ctrl-C）\n")
         return 130
     return emit(result, args.json)

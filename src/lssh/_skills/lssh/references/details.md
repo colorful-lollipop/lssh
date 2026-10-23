@@ -15,7 +15,9 @@
 
 ## 并发模型
 
-- 同机：串行排队（per-host 锁）。3 条 `sleep 1` ≈ 3.2 s。
+- 同机：默认 3 个并发槽位（远端 tmux 里 `w0/w1/w2` 各一个 window，共用同一条
+  SSH 连接）。一条 `sleep 600` 挂住时，另一条 `tail` 查询 ~0.3 s 返回；`--slots 1`
+  可退回"串行排队（per-host 锁）"。
 - 异机：并行。
 - 多 agent 共享一个守护进程：8 个客户端同时冷启动实测只有 1 条连接、1 次登录。
 - 需要同机真并发：任务丢后台，或拆到不同机器。
@@ -35,19 +37,29 @@
 
 远端 tmux pane 是所有 agent 共用的，`cd`/`export` 会互相影响。
 用绝对路径，或每条命令自带 `cd /path &&`。
-`--list` 中 `dirty` = 上次异常，下一条命令自动重连（多一次登录）；`BUSY` = 有命令在跑。
+`--list` 中 `dirty` = 上次异常，下一条命令自动重连（多一次登录）；
+`running:` = 本机客户端还有命令在这台机器上排队/执行；
+`远端仍在跑:` = 上一条命令客户端已经放弃等待，但远端可能还在跑（别重跑）。
+`idle=` 是距上次活动的秒数：堡垒机空闲几分钟会踢连接，看到 `dirty` 属正常，
+下一条命令会重连，不用干预。
 
 ## 错误处理
 
 | 现象 | 含义 | 处理 |
 |---|---|---|
-| `命令超时（Ns）` | 没在预算内结束 | 改后台任务或加大 `--timeout` |
-| 连续两次超时 | 会话判死，标记 dirty | 下一条自动重连，无需干预 |
+| `status=running` / rc 124 | 客户端放弃等待，命令仍在远端跑（已产出的输出会带回） | **别重跑**；`--list` 观察或 `--kill` 回收 |
+| `status=completed` + note | 命令其实跑完了，只是结束信号没等到 | 直接用输出，不要重跑 |
+| `status=disconnected` | 通道断了，远端状态未知 | 别重跑；重连后按 `remote` 的 `.out/.rc` 核对 |
+| `status=unknown` | 探测也没拿到现场 | 人工核对 `.out/.rc`，最保守的处理 |
+| `会话忙（N 个槽位都没空 …）` | 所有槽位都在跑命令 | `--wait 60` 排队，或 `lssh --list` 看是谁在跑 |
 | `输出校验失败` | 网关截断 | 重跑；仍失败 `--restart` |
 | `远端 shell 未就绪` | 认证失败或限流 | 等 2–3 分钟，别连续重试 |
-| `BUSY` 长期不退 | 命令卡住 | 等超时，必要时 `--restart` |
 
-排障：`lssh --list` → `tail -20 ~/.cache/lssh/daemon.log` → `lssh --restart <host>`。
+超时**不会**默认给远端发 Ctrl-C（`--interrupt-on-timeout` 才发），因为打断
+`mkfs`/`dd`/`rsync` 比超时本身更危险。
+
+排障：`lssh --list` → `tail -20 ~/.cache/lssh/daemon.log` → `lssh --restart <host>`
+→ 彻底卡死时 `lssh --kill <host>`。
 
 ## 反模式
 
@@ -55,7 +67,8 @@
 ✗ ssh a5-53 'npu-smi info'                    # exec 通道被禁
 ✗ for i in 1 2 3; do lssh a5-53 'date'; done   # 排队 + 限流，合成一条
 ✗ lssh a5-53 'make -j16'                       # 会超时，用 nohup
-✗ lssh a5-53 'exit'                            # 干掉远端 shell
+✗ lssh a5-53 'exit'                            # 打断 pane shell（现在能自愈，但没必要）
+✗ 看到超时就重跑同一条命令                      # 可能把 mkfs/dd 跑第二遍，先看 status
 ✗ lssh --stop                                  # 影响所有 agent
 ✗ lssh a5-53 'vim /etc/hosts'                  # 无 tty，卡死
 ```

@@ -27,6 +27,9 @@ DEFAULTS: dict = {
     "connect_timeout": 15,
     "cols": 512,
     "rows": 50,
+    #: 每台机器最多几个并发槽位（远端 tmux window 数）。
+    #: 一条长任务挂住时，其它槽位仍可用来查询；设为 1 就退回串行行为。
+    "slots": 3,
 }
 
 SECRETS_TEMPLATE = """\
@@ -85,6 +88,7 @@ def init_files() -> list[tuple[str, bool]]:
         "timeout": DEFAULTS["timeout"],
         "idle": DEFAULTS["idle"],
         "tmux": DEFAULTS["tmux"],
+        "slots": DEFAULTS["slots"],
         "hosts": {},
     }
     results.append(

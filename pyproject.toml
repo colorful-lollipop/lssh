@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "lssh-cli"
-version = "0.4.0"
+version = "0.5.0"
 description = "Run commands over long-lived SSH sessions when the gateway forbids the exec channel"
 readme = "README.md"
 requires-python = ">=3.9"

@@ -177,8 +177,12 @@ from `lssh -h`.
 - A timeout sends `Ctrl-C` and waits 3 s; if that does not settle the shell, the session
   is rebuilt. Whether `Ctrl-C` actually interrupts depends on the remote pty having a
   controlling terminal (usually true over SSH).
-- Commands on one host are serialized (one shell, one foreground process); different
-  hosts run in parallel.
+- One host gets up to 3 concurrent slots (`--slots N`), so a command that hangs for
+  hours no longer blocks a quick query. Commands land on a free slot; **sequential
+  commands stick to the same slot**, so `cd`/`export` still persist — but two commands
+  running concurrently have independent cwd/env (use absolute paths). Only when all
+  slots are taken does lssh answer "busy" (`--wait 30` queues). Different hosts always
+  run in parallel.
 - `state=dirty` in `--list` means the previous run failed; the next command reconnects.
 
 ## Development

@@ -27,6 +27,7 @@ ${XDG_CACHE_HOME:-~/.cache}/lssh/daemon.log     # no command content is logged
   "timeout": 120,          // per-command timeout, seconds
   "idle": 1800,            // close an idle channel after N seconds
   "tmux": "lssh",          // remote tmux session name
+  "slots": 3,              // concurrent windows per host (1 = serial)
   "connect_timeout": 15,   // ssh ConnectTimeout
   "cols": 512,             // pty columns (wide = fewer wrapped lines)
   "rows": 50,
@@ -46,6 +47,12 @@ Resolution order for every key:
 
 `hosts` keys are glob patterns matched with `fnmatch` against the host as written on
 the command line (an `~/.ssh/config` alias, or `user@host`).
+
+`slots` is how many concurrent commands one host accepts. Each slot is a window
+(`w0`, `w1`, …) inside the single remote tmux session, so raising it does **not** open
+more SSH logins — the whole point is to keep exactly one connection. `slots: 1` restores
+the old strictly-serial behaviour. The daemon has to be restarted (`lssh --stop`) for a
+change to take effect.
 
 ## Credentials
 

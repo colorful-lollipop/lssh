@@ -102,7 +102,7 @@ ln -sf "$PWD/.venv/bin/lssh" ~/.local/bin/lssh
 ```bash
 lssh <host> 'cmd'           # 执行；多条命令用 ; 或换行分隔
 lssh <host>                 # 逐行 REPL，送进同一个远端 shell
-lssh --list                 # 会话状态：state / idle / uptime / busy
+lssh --list                 # 会话状态：state / idle / uptime / 每个槽位在跑什么
 lssh --restart <host>       # 断开重连（远端 tmux 会话保留）
 lssh --json <host> 'cmd'    # 原始 JSON 结果
 lssh -h                     # 行为说明与长任务写法
@@ -117,6 +117,8 @@ lssh -h                     # 行为说明与长任务写法
 | `--tmux NAME` | 远端 tmux 会话名，默认 `lssh` |
 | `--ssh-arg ARG` | 透传给 `ssh` 的额外参数，可重复 |
 | `--idle N` | 空闲多少秒关闭通道，默认 1800 |
+| `--slots N` | 每台机器最大并发槽位（远端 tmux window 数），默认 3；`1` = 退回串行 |
+| `--slot N` | 把这条命令钉在指定槽位（默认自动挑空闲的） |
 | `--local SHELL` | 调试用：把"远端"换成本地 shell |
 
 退出码与远端命令一致（0–255）；连接、超时、校验失败返回 1，并在 stderr 说明原因。
@@ -167,7 +169,10 @@ OpenClaw、Qwen Code、Cline、Kiro、Goose、DeepSeek Harness…）在该目录
 - 输出在**命令结束后**才返回（原子、可校验），没有流式；长任务请放后台轮询日志。
 - 超时会先发 `Ctrl-C` 并等 3 秒收尾，收不回来就重建会话。能否真正打断取决于远端
   pty 是否有控制终端（真实 SSH 场景通常可以）。
-- 同一台机器的命令串行执行（一个 shell 一个前台进程）；不同机器并行。
+- 同一台机器最多 3 个并发槽位（`--slots` 可调）：一条长任务挂住时，另一条命令
+  仍能秒回。命令会被投到空闲槽位；**顺序命令粘在同一槽位**，所以 `cd`/`export`
+  照旧保持，而**并发执行的两条命令 cwd/环境各自独立**（建议用绝对路径）。
+  三个槽位都占满时才会报"会话忙"（`--wait 30` 排队）。
 - `--list` 中 `state=dirty` 表示上次执行异常，下一条命令会自动重连。
 
 ## 开发
